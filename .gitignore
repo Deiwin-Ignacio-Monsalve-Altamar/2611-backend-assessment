@@ -24,3 +24,5 @@ build/
 # Local secrets
 .env
 *.env
+
+practical/requests.http
