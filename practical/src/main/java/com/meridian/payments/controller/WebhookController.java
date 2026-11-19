@@ -2,6 +2,7 @@ package com.meridian.payments.controller;
 
 import java.util.UUID;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.meridian.payments.dto.WebhookAckResponse;
+import com.meridian.payments.security.WebhookHmacVerifier;
 import com.meridian.payments.service.IntakeResult;
 import com.meridian.payments.service.WebhookIntakeService;
 
@@ -24,9 +26,13 @@ import com.meridian.payments.service.WebhookIntakeService;
 public class WebhookController {
 
     private final WebhookIntakeService intakeService;
+    private final WebhookHmacVerifier hmacVerifier;
 
-    public WebhookController(WebhookIntakeService intakeService) {
+    public WebhookController(
+            WebhookIntakeService intakeService,
+            WebhookHmacVerifier hmacVerifier) {
         this.intakeService = intakeService;
+        this.hmacVerifier = hmacVerifier;
     }
 
     @GetMapping("/health")
@@ -38,13 +44,16 @@ public class WebhookController {
     public ResponseEntity<WebhookAckResponse> receiveWebhook(
             @PathVariable String provider,
             @RequestBody String rawBody,
-            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) throws Exception {
+            @RequestHeader HttpHeaders headers) throws Exception {
 
-        String traceId = (correlationId != null && !correlationId.isBlank())
-                ? correlationId.trim()
+        hmacVerifier.verify(provider, rawBody, headers);
+
+        String headerCorrelation = headers.getFirst("X-Correlation-Id");
+        String correlationId = (headerCorrelation != null && !headerCorrelation.isBlank())
+                ? headerCorrelation.trim()
                 : UUID.randomUUID().toString();
 
-        IntakeResult result = intakeService.processWebhook(provider, rawBody, traceId);
+        IntakeResult result = intakeService.processWebhook(provider, rawBody, correlationId);
         HttpStatus status = switch (result.outcome()) {
             case ACCEPTED -> HttpStatus.ACCEPTED;
             case DUPLICATE, OUT_OF_ORDER_IGNORED -> HttpStatus.OK;
@@ -53,7 +62,7 @@ public class WebhookController {
         WebhookAckResponse body = new WebhookAckResponse(
                 result.outcome().name(),
                 result.event().paymentKey(),
-                traceId);
+                correlationId);
 
         return ResponseEntity.status(status).body(body);
     }

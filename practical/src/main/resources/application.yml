@@ -1,9 +1,9 @@
-spring:
-  application:
-    name: payments-intake
-  jackson:
-    deserialization:
-      fail-on-unknown-properties: false
-
 server:
   port: 8080
+
+meridian:
+  webhooks:
+    secrets:
+      andina: ${ANDINA_WEBHOOK_SECRET:local-andina-dev-secret}
+      quetzal: ${QUETZAL_WEBHOOK_SECRET:local-quetzal-dev-secret}
+    max-timestamp-skew-seconds: 300
