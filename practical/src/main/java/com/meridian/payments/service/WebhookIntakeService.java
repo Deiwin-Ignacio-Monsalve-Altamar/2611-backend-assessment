@@ -18,7 +18,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meridian.payments.model.CanonicalPaymentEvent;
 
 /**
- * Initial happy-path intake service starting with Andina Pay (Colombia).
+ * Initial happy-path intake service for Andina Pay (CO) and Quetzal Pagos (MX).
+ * Parses provider payloads, maps them to the canonical schema, and strips payer PII.
  */
 @Service
 public class WebhookIntakeService {
@@ -74,9 +75,69 @@ public class WebhookIntakeService {
                 statusChangedAt,
                 Instant.now());
 
-        // 4. Store in memory stub (Service Bus publisher added in later step)
+        // 4. Store in memory stub
         publishedEvents.add(event);
         log.info("Accepted Andina webhook: paymentKey={}, status={}, correlationId={}",
+                event.paymentKey(), event.status(), correlationId);
+
+        return event;
+    }
+
+    public CanonicalPaymentEvent processQuetzal(String rawBody, String correlationId) throws Exception {
+        // 1. Parse raw JSON payload from Quetzal
+        JsonNode root = objectMapper.readTree(rawBody);
+        String providerEventId = root.path("id").asText();
+        String eventType = root.path("type").asText();
+        long createdEpoch = root.path("created").asLong();
+
+        JsonNode charge = root.path("data").path("charge");
+        String chargeId = charge.path("id").asText();
+        long amountMinor = charge.path("amount").asLong();
+        String currency = charge.path("currency").asText("MXN").toUpperCase();
+        String reference = charge.path("reference").asText();
+
+        // 2. Convert minor units (centavos) to major MXN decimal string
+        String amount = BigDecimal.valueOf(amountMinor)
+                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP)
+                .toPlainString();
+
+        // 3. Map Quetzal event type to canonical status
+        String canonicalStatus = switch (eventType) {
+            case "charge.succeeded" -> "CAPTURED";
+            case "charge.failed" -> "FAILED";
+            case "charge.refunded" -> "REFUNDED";
+            default -> "PENDING";
+        };
+
+        // 4. Resolve authoritative status timestamp (paid_at, refunded_at, or fallback to created)
+        long statusEpoch = createdEpoch;
+        if ("REFUNDED".equals(canonicalStatus) && charge.hasNonNull("refunded_at")) {
+            statusEpoch = charge.path("refunded_at").asLong();
+        } else if ("CAPTURED".equals(canonicalStatus) && charge.hasNonNull("paid_at")) {
+            statusEpoch = charge.path("paid_at").asLong();
+        }
+
+        // 5. Build canonical event without customer email PII
+        CanonicalPaymentEvent event = new CanonicalPaymentEvent(
+                CanonicalPaymentEvent.SCHEMA_VERSION,
+                UUID.randomUUID().toString(),
+                correlationId,
+                "QUETZAL",
+                "MX",
+                "QUETZAL:" + chargeId,
+                providerEventId,
+                chargeId,
+                "QUETZAL:" + providerEventId,
+                reference,
+                canonicalStatus,
+                amount,
+                currency,
+                Instant.ofEpochSecond(statusEpoch),
+                Instant.now());
+
+        // 6. Store in memory stub
+        publishedEvents.add(event);
+        log.info("Accepted Quetzal webhook: paymentKey={}, status={}, correlationId={}",
                 event.paymentKey(), event.status(), correlationId);
 
         return event;

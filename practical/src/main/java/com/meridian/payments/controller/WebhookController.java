@@ -23,7 +23,6 @@ public class WebhookController {
 
     private final WebhookIntakeService intakeService;
 
-    // Constructor injection wired automatically by Spring Boot
     public WebhookController(WebhookIntakeService intakeService) {
         this.intakeService = intakeService;
     }
@@ -38,11 +37,24 @@ public class WebhookController {
             @RequestBody String rawBody,
             @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) throws Exception {
 
-        String traceId = (correlationId != null && !correlationId.isBlank())
-                ? correlationId
-                : UUID.randomUUID().toString();
-
+        String traceId = resolveCorrelationId(correlationId);
         CanonicalPaymentEvent event = intakeService.processAndina(rawBody, traceId);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(event);
+    }
+
+    @PostMapping("/webhooks/quetzal")
+    public ResponseEntity<CanonicalPaymentEvent> receiveQuetzal(
+            @RequestBody String rawBody,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) throws Exception {
+
+        String traceId = resolveCorrelationId(correlationId);
+        CanonicalPaymentEvent event = intakeService.processQuetzal(rawBody, traceId);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(event);
+    }
+
+    private String resolveCorrelationId(String correlationId) {
+        return (correlationId != null && !correlationId.isBlank())
+                ? correlationId
+                : UUID.randomUUID().toString();
     }
 }
