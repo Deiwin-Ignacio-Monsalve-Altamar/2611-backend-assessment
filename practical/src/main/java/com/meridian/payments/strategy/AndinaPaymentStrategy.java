@@ -1,17 +1,19 @@
 package com.meridian.payments.strategy;
 
-import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
-import java.time.OffsetDateTime;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Component;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meridian.payments.dto.AndinaWebhookRequest;
 import com.meridian.payments.model.CanonicalPaymentEvent;
 import com.meridian.payments.service.PolicyNumberNormalizer;
+
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validator;
 
 /**
  * Strategy implementation for Andina Pay (Colombia).
@@ -20,10 +22,15 @@ import com.meridian.payments.service.PolicyNumberNormalizer;
 public class AndinaPaymentStrategy implements PaymentProviderStrategy {
 
     private final ObjectMapper objectMapper;
+    private final Validator validator;
     private final PolicyNumberNormalizer policyNormalizer;
 
-    public AndinaPaymentStrategy(ObjectMapper objectMapper, PolicyNumberNormalizer policyNormalizer) {
+    public AndinaPaymentStrategy(
+            ObjectMapper objectMapper,
+            Validator validator,
+            PolicyNumberNormalizer policyNormalizer) {
         this.objectMapper = objectMapper;
+        this.validator = validator;
         this.policyNormalizer = policyNormalizer;
     }
 
@@ -34,45 +41,46 @@ public class AndinaPaymentStrategy implements PaymentProviderStrategy {
 
     @Override
     public CanonicalPaymentEvent mapToCanonical(String rawBody, String correlationId) throws Exception {
-        // 1. Parse raw JSON payload from Andina
-        JsonNode root = objectMapper.readTree(rawBody);
-        String notificationId = root.path("notificacion_id").asText();
+        AndinaWebhookRequest payload = objectMapper.readValue(rawBody, AndinaWebhookRequest.class);
+        validatePayload(payload);
 
-        JsonNode tx = root.path("transaccion");
-        String txId = tx.path("id").asText();
-        String rawState = tx.path("estado").asText().trim().toUpperCase();
-        String amount = new BigDecimal(tx.path("valor").asText())
-                .setScale(2, RoundingMode.HALF_UP)
-                .toPlainString();
-        String currency = tx.path("moneda").asText("COP").trim().toUpperCase();
-        String policyNumber = policyNormalizer.normalize(tx.path("referencia").asText(), "CO");
-        Instant statusChangedAt = OffsetDateTime.parse(tx.path("fecha_transaccion").asText()).toInstant();
+        var tx = payload.transaccion();
+        String rawState = tx.estado().trim().toUpperCase();
+        String amount = tx.valor().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        String currency = tx.moneda().trim().toUpperCase();
+        String policyNumber = policyNormalizer.normalize(tx.referencia(), "CO");
 
-        // 2. Map Spanish transaction state to canonical payment status
         String canonicalStatus = switch (rawState) {
             case "PENDIENTE" -> "PENDING";
             case "APROBADA" -> "CAPTURED";
             case "RECHAZADA" -> "FAILED";
             case "REVERSADA" -> "REFUNDED";
-            default -> "PENDING";
+            default -> throw new IllegalArgumentException("Unsupported Andina transaction state: " + rawState);
         };
 
-        // 3. Build canonical event (idempotency uses txId + state because notificacion_id changes on retries)
         return new CanonicalPaymentEvent(
                 CanonicalPaymentEvent.SCHEMA_VERSION,
                 UUID.randomUUID().toString(),
                 correlationId,
                 "ANDINA",
                 "CO",
-                "ANDINA:" + txId,
-                notificationId,
-                txId,
-                "ANDINA:" + txId + ":" + rawState,
+                "ANDINA:" + tx.id().trim(),
+                payload.notificacionId().trim(),
+                tx.id().trim(),
+                "ANDINA:" + tx.id().trim() + ":" + rawState,
                 policyNumber,
                 canonicalStatus,
                 amount,
                 currency,
-                statusChangedAt,
+                tx.fechaTransaccion().toInstant(),
                 Instant.now());
+    }
+
+    private <T> void validatePayload(T target) {
+        Set<ConstraintViolation<T>> violations = validator.validate(target);
+        if (!violations.isEmpty()) {
+            ConstraintViolation<T> first = violations.iterator().next();
+            throw new IllegalArgumentException(first.getPropertyPath() + " " + first.getMessage());
+        }
     }
 }

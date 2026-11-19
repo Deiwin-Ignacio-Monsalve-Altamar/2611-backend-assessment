@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.meridian.payments.model.CanonicalPaymentEvent;
+import com.meridian.payments.dto.WebhookAckResponse;
 import com.meridian.payments.service.IntakeResult;
 import com.meridian.payments.service.WebhookIntakeService;
 
@@ -35,24 +35,26 @@ public class WebhookController {
     }
 
     @PostMapping("/webhooks/{provider}")
-    public ResponseEntity<CanonicalPaymentEvent> receiveWebhook(
+    public ResponseEntity<WebhookAckResponse> receiveWebhook(
             @PathVariable String provider,
             @RequestBody String rawBody,
             @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) throws Exception {
 
         String traceId = (correlationId != null && !correlationId.isBlank())
-                ? correlationId
+                ? correlationId.trim()
                 : UUID.randomUUID().toString();
 
-        try {
-            IntakeResult result = intakeService.processWebhook(provider, rawBody, traceId);
-            HttpStatus status = switch (result.outcome()) {
-                case ACCEPTED -> HttpStatus.ACCEPTED;
-                case DUPLICATE, OUT_OF_ORDER_IGNORED -> HttpStatus.OK;
-            };
-            return ResponseEntity.status(status).body(result.event());
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
-        }
+        IntakeResult result = intakeService.processWebhook(provider, rawBody, traceId);
+        HttpStatus status = switch (result.outcome()) {
+            case ACCEPTED -> HttpStatus.ACCEPTED;
+            case DUPLICATE, OUT_OF_ORDER_IGNORED -> HttpStatus.OK;
+        };
+
+        WebhookAckResponse body = new WebhookAckResponse(
+                result.outcome().name(),
+                result.event().paymentKey(),
+                traceId);
+
+        return ResponseEntity.status(status).body(body);
     }
 }
