@@ -1,0 +1,251 @@
+openapi: 3.1.0
+info:
+  title: Meridian Mutual — Premium Payment Webhooks API
+  version: 1.0.0
+  description: >
+    Internet-facing webhook intake endpoints exposed through Azure API Management
+    for country payment providers (Quetzal Pagos in Mexico, Andina Pay in Colombia).
+    Providers authenticate using their native HMAC signatures.
+servers:
+  - url: https://api.meridianmutual.example/payments/v1
+    description: Production via Azure API Management
+  - url: https://api-test.meridianmutual.example/payments/v1
+    description: Test environment via Azure API Management
+
+paths:
+  /webhooks/quetzal:
+    post:
+      summary: Receive Quetzal Pagos (Mexico) webhook notification
+      operationId: receiveQuetzalWebhook
+      tags:
+        - Webhooks
+      parameters:
+        - name: Quetzal-Signature
+          in: header
+          required: true
+          description: >
+            HMAC-SHA256 signature header in format `t=<unix_seconds>,v1=<hex_sig>[,v1=<rotated_sig>]`.
+            Timestamp must be within 300 seconds of server time.
+          schema:
+            type: string
+            example: "t=1795888803,v1=2d07770582c02f15235ac4e027b7732beef86be103c574a1c3b988a4275f5031"
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          description: Optional correlation ID injected by Azure API Management.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuetzalWebhookPayload"
+      responses:
+        "202":
+          description: Notification accepted and queued for processing.
+        "200":
+          description: Duplicate notification already processed (idempotent acknowledgment).
+        "400":
+          description: Malformed JSON or missing required payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid, or expired HMAC signature.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /webhooks/andina:
+    post:
+      summary: Receive Andina Pay (Colombia) webhook notification
+      operationId: receiveAndinaWebhook
+      tags:
+        - Webhooks
+      parameters:
+        - name: X-Andina-Timestamp
+          in: header
+          required: true
+          description: ISO-8601 timestamp with offset. Must be within 10 minutes of server time.
+          schema:
+            type: string
+            format: date-time
+            example: "2026-11-28T14:03:11-05:00"
+        - name: X-Andina-Signature
+          in: header
+          required: true
+          description: Base64-encoded HMAC-SHA256 of `<X-Andina-Timestamp>.<raw_body>`.
+          schema:
+            type: string
+            example: "MFQjfviySi6CjqbWtQcy5spKtXxHIxAvmg5W3PTzPJk="
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          description: Optional correlation ID injected by Azure API Management.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AndinaWebhookPayload"
+      responses:
+        "202":
+          description: Notification accepted and queued for processing.
+        "200":
+          description: Duplicate notification already processed (idempotent acknowledgment).
+        "400":
+          description: Malformed JSON or missing required payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid, or expired HMAC signature.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    QuetzalWebhookPayload:
+      type: object
+      additionalProperties: true
+      required:
+        - id
+        - type
+        - created
+        - data
+      properties:
+        id:
+          type: string
+          example: "evt_01JDQ3K8M2X7"
+        type:
+          type: string
+          enum: [charge.succeeded, charge.failed, charge.refunded]
+        api_version:
+          type: string
+          example: "2025-06-01"
+        created:
+          type: integer
+          format: int64
+          example: 1795888800
+        data:
+          type: object
+          additionalProperties: true
+          required:
+            - charge
+          properties:
+            charge:
+              type: object
+              additionalProperties: true
+              required:
+                - id
+                - amount
+                - currency
+                - reference
+              properties:
+                id:
+                  type: string
+                  example: "ch_7Hk2Lm9QpZ"
+                amount:
+                  type: integer
+                  format: int64
+                  description: Amount in minor unit (centavos).
+                  example: 125000
+                amount_refunded:
+                  type: integer
+                  format: int64
+                  nullable: true
+                currency:
+                  type: string
+                  example: "mxn"
+                reference:
+                  type: string
+                  example: "POL-MX-000412785"
+                failure_code:
+                  type: string
+                  nullable: true
+                paid_at:
+                  type: integer
+                  format: int64
+                  nullable: true
+                refunded_at:
+                  type: integer
+                  format: int64
+                  nullable: true
+
+    AndinaWebhookPayload:
+      type: object
+      additionalProperties: true
+      required:
+        - notificacion_id
+        - fecha_notificacion
+        - transaccion
+      properties:
+        notificacion_id:
+          type: string
+          example: "ntf-8f1c2a77"
+        fecha_notificacion:
+          type: string
+          format: date-time
+        transaccion:
+          type: object
+          additionalProperties: true
+          required:
+            - id
+            - estado
+            - valor
+            - moneda
+            - referencia
+            - fecha_transaccion
+          properties:
+            id:
+              type: string
+              example: "TRX-CO-5521907"
+            estado:
+              type: string
+              enum: [PENDIENTE, APROBADA, RECHAZADA, REVERSADA]
+            valor:
+              type: string
+              example: "185000.00"
+            moneda:
+              type: string
+              example: "COP"
+            referencia:
+              type: string
+              example: "POL-CO-000187342"
+            medio_pago:
+              type: string
+            fecha_transaccion:
+              type: string
+              format: date-time
+            motivo_reverso:
+              type: string
+              nullable: true
+            canal:
+              type: string
+              nullable: true
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: "INVALID_SIGNATURE"
+        message:
+          type: string
+          example: "Webhook signature verification failed"
+        correlationId:
+          type: string
+          format: uuid
