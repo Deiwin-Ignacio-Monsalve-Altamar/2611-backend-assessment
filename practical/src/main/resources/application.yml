@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: payments-intake
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: false
+
+server:
+  port: 8080
