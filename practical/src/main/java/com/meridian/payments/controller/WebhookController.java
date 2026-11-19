@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.meridian.payments.model.CanonicalPaymentEvent;
+import com.meridian.payments.service.IntakeResult;
 import com.meridian.payments.service.WebhookIntakeService;
 
 /**
@@ -44,8 +45,12 @@ public class WebhookController {
                 : UUID.randomUUID().toString();
 
         try {
-            CanonicalPaymentEvent event = intakeService.processWebhook(provider, rawBody, traceId);
-            return ResponseEntity.status(HttpStatus.ACCEPTED).body(event);
+            IntakeResult result = intakeService.processWebhook(provider, rawBody, traceId);
+            HttpStatus status = switch (result.outcome()) {
+                case ACCEPTED -> HttpStatus.ACCEPTED;
+                case DUPLICATE, OUT_OF_ORDER_IGNORED -> HttpStatus.OK;
+            };
+            return ResponseEntity.status(status).body(result.event());
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }
