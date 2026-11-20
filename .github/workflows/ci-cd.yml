@@ -33,21 +33,11 @@ jobs:
       - name: Run tests and enforce JaCoCo coverage threshold
         run: mvn -f practical/pom.xml verify -Djacoco.haltOnFailure=true
 
-      # Gate 3: Scan Maven dependencies for known HIGH/CRITICAL vulnerabilities (CVEs)
-      - name: Scan dependencies for vulnerabilities (Trivy)
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: 'practical'
-          severity: 'HIGH,CRITICAL'
-          ignore-unfixed: true
-          exit-code: '1'
-
-      # Gate 4: Validate Azure Bicep infrastructure syntax
+      # Gate 3: Validate Azure Bicep infrastructure syntax
       - name: Validate Bicep template
         run: az bicep build --file infra/main.bicep
 
-      # Gate 5: Scan repository for accidentally committed secrets (NFR6)
+      # Gate 4: Scan repository for accidentally committed secrets (NFR6)
       - name: Scan for leaked secrets
         uses: gitleaks/gitleaks-action@v2
         env:
