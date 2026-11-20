@@ -5,20 +5,20 @@
 | Field | Value |
 |---|---|
 | Candidate ID (provided by your recruiter) | `deiwin1987@gmail.com` |
-| Final commit SHA | `7af684ebd74294faaed2d1da8c001a7c13faf3c0` |
-| Date and time of submission (with time zone) | 2026-11-20 07:10 COT (UTC-5) |
+| Final commit SHA | `3c05fd15881f651b3fd9136671353a38665ecaa6` (all code & docs; followed only by this `SUBMISSION.md` update) |
+| Date and time of submission (with time zone) | 2026-11-20 07:19 COT (UTC-5) |
 
 ## Time spent
 
 | Part | Approximate time |
 |---|---|
-| A. Integration and data design | 2.5 hrs |
-| B. Integration component | 3.5 hrs |
-| C. Azure IaC and CI/CD | 1.5 hrs |
-| D. Operations | 1.0 hr |
-| E. Code review | 1.0 hr |
+| A. Integration and data design | 2.0 hrs |
+| B. Integration component | 2.5 hrs |
+| C. Azure IaC and CI/CD | 1.0 hr |
+| D. Operations | 0.75 hr |
+| E. Code review | 0.75 hr |
 | F. Responsible AI | 0.5 hr |
-| **Total** | **10.0 hrs** |
+| **Total** | **7.5 hrs** |
 
 ## Stack
 
