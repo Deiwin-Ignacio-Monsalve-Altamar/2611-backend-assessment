@@ -1,0 +1,11 @@
+title = "Meridian Mutual Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore assessment reference samples and the deliberately vulnerable PR-214 diff fixture"
+paths = [
+  '''^reference/''',
+  '''^pr-review/PR-214\.diff$''',
+]
