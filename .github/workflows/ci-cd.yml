@@ -45,70 +45,75 @@ jobs:
 
   deploy-dev:
     name: CD — Deploy to Dev
-    needs: ci-checks
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build-and-validate
+    if: ${{ github.ref == 'refs/heads/main' && vars.AZURE_CLIENT_ID != '' }}
     runs-on: ubuntu-latest
     environment: dev
+    permissions:
+      id-token: write
+      contents: read
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Deploy Infrastructure (Dev)
+      - name: Deploy Bicep to Dev
         run: |
           az deployment group create \
-            --resource-group meridian-pay-dev-rg \
+            --resource-group rg-meridian-payments-dev \
             --template-file infra/main.bicep \
-            --parameters environment=dev logAnalyticsWorkspaceId=${{ vars.LOG_ANALYTICS_ID }}
+            --parameters environment=dev
 
   deploy-test:
     name: CD — Deploy to Test
     needs: deploy-dev
+    if: ${{ vars.AZURE_CLIENT_ID != '' }}
     runs-on: ubuntu-latest
     environment: test
+    permissions:
+      id-token: write
+      contents: read
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Deploy Infrastructure (Test)
+      - name: Deploy Bicep to Test
         run: |
           az deployment group create \
-            --resource-group meridian-pay-test-rg \
+            --resource-group rg-meridian-payments-test \
             --template-file infra/main.bicep \
-            --parameters environment=test logAnalyticsWorkspaceId=${{ vars.LOG_ANALYTICS_ID }}
+            --parameters environment=test
 
   deploy-prod:
-    name: CD — Deploy to Prod (Manual Approval)
+    name: CD — Deploy to Prod
     needs: deploy-test
+    if: ${{ vars.AZURE_CLIENT_ID != '' }}
     runs-on: ubuntu-latest
-    environment: prod # Requires manual reviewer approval in GitHub Environments
+    environment: prod
+    permissions:
+      id-token: write
+      contents: read
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Deploy Infrastructure (Prod)
+      - name: Preview Prod Infrastructure Changes (what-if)
+        run: |
+          az deployment group what-if \
+            --resource-group rg-meridian-payments-prod \
+            --template-file infra/main.bicep \
+            --parameters environment=prod
+      - name: Deploy Bicep to Prod
         run: |
           az deployment group create \
-            --resource-group meridian-pay-prod-rg \
+            --resource-group rg-meridian-payments-prod \
             --template-file infra/main.bicep \
-            --parameters environment=prod logAnalyticsWorkspaceId=${{ vars.LOG_ANALYTICS_ID }}
+            --parameters environment=prod
