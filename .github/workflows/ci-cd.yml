@@ -25,7 +25,7 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      # Gate 1: Code formatting & style linting (Spotless / Checkstyle)
+      # Gate 1: Code formatting & style linting (Spotless)
       - name: Verify code formatting and style
         run: mvn -f practical/pom.xml spotless:check
 
@@ -45,7 +45,7 @@ jobs:
 
   deploy-dev:
     name: CD — Deploy to Dev
-    needs: build-and-validate
+    needs: ci-checks
     if: ${{ github.ref == 'refs/heads/main' && vars.AZURE_CLIENT_ID != '' }}
     runs-on: ubuntu-latest
     environment: dev
