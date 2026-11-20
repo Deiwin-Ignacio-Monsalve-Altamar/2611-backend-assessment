@@ -1,42 +1,35 @@
-# Operations Guide — Premium Payment Notifications
+# Operations Runbook — Payment Webhook Platform
 
-## 1. SLIs and SLOs by Country
+## 1. Service Level Indicators (SLIs) & Alerts
 
-Based on **NFR2** (freshness) and **NFR3** (durability), we track two core indicators per country:
+All queues/topics across **Colombia (`co`)**, **Mexico (`mx`)**, and **Chile (`cl`)** must have identical monitoring provisioned via IaC:
 
-| Country | Provider | Durability SLI (NFR3) | SLO | Freshness SLI (NFR2) | SLO |
-|---|---|---|---|---|---|
-| **Mexico** | Quetzal Pagos | `persisted_events / total_2xx_webhooks` | **100%** (zero lost accepted webhooks) | Time from webhook `2xx` to Salesforce upsert (`p95` / `p99.5`) | `p95 <= 5 min`, `p99.5 <= 60 min` |
-| **Colombia** | Andina Pay | `persisted_events / total_2xx_webhooks` | **100%** (zero lost accepted webhooks) | Time from webhook `2xx` to Salesforce upsert (`p95` / `p99.5`) | `p95 <= 5 min`, `p99.5 <= 60 min` |
-| **Chile** | Austral Pagos | `persisted_events / total_2xx_webhooks` | **100%** (zero lost accepted webhooks) | Time from webhook `2xx` to Salesforce upsert (`p95` / `p99.5`) | `p95 <= 5 min`, `p99.5 <= 60 min` |
-
-If durability ever drops below `100%` (meaning we returned `200`/`202` to a gateway but failed to save or enqueue the event), we treat it as a SEV-1 and freeze non-urgent deploys until fixed.
-
----
-
-## 2. Tracing, Metrics, and Privacy (NFR6)
-
-### How `correlationId` travels end to end
-1. **API Manager & Intake:** Reads `X-Correlation-Id` from the request header (or generates a UUID if missing) and puts it into SLF4J `MDC` and the HTTP response header.
-2. **Cosmos DB & Service Bus:** Saves `correlationId` in the payment state record and copies it to the Service Bus message `CorrelationId` property.
-3. **Salesforce Consumer:** Logs `correlationId` on every upsert attempt and writes it to `External_Correlation_Id__c` on `Premium_Payment__c` so support can trace a record back to the original webhook.
-
-### What we log and measure
-* **Structured JSON logs (Application Insights):** `timestamp`, `level`, `country`, `provider`, `correlationId`, `paymentKey`, `idempotencyKey`, `status`, `httpStatus`, `sfErrorCode`, and `latencyMs`.
-* **Custom metrics (Azure Monitor):**
-  * `webhook.received.count` and `webhook.rejected.count` (tagged by `provider` and HTTP status `400`/`401`).
-  * `servicebus.queue.depth` and `servicebus.dlq.depth` (tagged by `country`).
-  * `salesforce.api.calls.24h_pct` (percentage of the 150,000 daily API call budget).
-* **Never logged:** Raw webhook bodies, payer names, national IDs (`cédula`, `CURP`, `RUT`), emails, phone numbers, or webhook HMAC secrets.
+| Signal | Target / Healthy Baseline | Alert Threshold | Severity |
+|---|---|---|---|
+| Webhook Intake Latency (`POST /v1/webhooks/{provider}`) | `p95 < 250 ms` | `p95 > 800 ms` for 5 min | SEV-3 |
+| Webhook `5xx` Error Rate | `< 0.1%` | `> 1%` for 5 min | SEV-2 |
+| HMAC Signature Rejections (`401`) | `< 5 / min` | `> 25 / min` (key mismatch or attack) | SEV-2 |
+| Service Bus DLQ Depth (per country) | `0` messages | `> 0` messages for 5 min | SEV-2 |
+| Salesforce `400` Validation Errors | `0` messages | `> 10` in 5 min (indicates schema/mapping drift) | SEV-2 |
+| Salesforce Rolling 24h API Quota | `< 50%` | `> 75%` warning / `> 85%` critical | SEV-2 |
 
 ---
 
-## 3. Alerts
+## 2. Standard Operating Procedures (SOPs)
 
-| Alert | Trigger | Severity | Who gets paged | First check |
-|---|---|---|---|---|
-| **DLQ Messages Present** | `DeadLetteredMessageCount > 0` for 5 min on **any** country queue (`co`, `mx`, `cl`) | **SEV-2** | On-call Backend Engineer | Peek dead-lettered messages and check `lastError` / `sfErrorCode`. |
-| **Freshness Slowdown** | `p95` end-to-end latency `> 4 min` for 10 min in any country | **SEV-2** | On-call Backend Engineer | Check Service Bus backlog and Salesforce `5xx` / `429` error rates. |
-| **Salesforce Budget High** | Rolling 24h Salesforce calls `>= 75%` of the 150k limit (`112,500` calls) | **SEV-2** | On-call Backend Engineer + Tech Lead | Look for retry loops on `400` errors; enable batching/throttling if needed. |
-| **Signature Errors Spike** | `> 20` `401 Unauthorized` responses in 5 min for one gateway | **SEV-3** | On-call Backend Engineer | Check Key Vault secret rotation or gateway clock drift (`±300s` window). |
-| **Intake Storage Failure** | Any `5xx` after signature validation passes | **SEV-1** | On-call Backend Engineer + Platform SRE | Check Cosmos DB and Service Bus health; gateways will retry `5xx`. |
+### SOP-1: Handling Service Bus Dead-Letter Queue (DLQ) Alerts
+1. **Inspect, Do Not Blindly Replay:** Read sample messages from `<queue>/$deadletterqueue` using Azure Service Bus Explorer or CLI and check `DeadLetterReason` and `lastError`.
+2. **Classify the Failure:**
+   - **Transient Downstream Outage (`5xx` / `429`):** Wait until Salesforce recovers, then replay at a throttled rate (`<= 20 msg/sec`).
+   - **Data / Mapping Error (`400 INVALID_FIELD`):** Fix the normalization/mapping bug first, deploy the patch, normalize the exported DLQ payloads, and then replay.
+3. **Preserve Event Ordering:** When replaying multiple messages for the same `paymentKey` / `transaccion.id` (for example, `APROBADA` followed by `REVERSADA`), sort by event timestamp before re-enqueueing so final state in Salesforce is accurate.
+
+### SOP-2: Zero-Downtime Webhook Secret Rotation
+1. Generate a new 256-bit HMAC secret in **Azure Key Vault** as a new secret version.
+2. Enable dual-secret validation in `payments-intake` (accepting both `current` and `previous` secret versions) for a 24-hour overlap window.
+3. Share the new secret with the payment gateway (Andina Pay, Quetzal Pagos, or Austral) over an encrypted channel and confirm cutover.
+4. Disable the old secret version in Key Vault and verify `401` signature failure metrics stay at baseline.
+
+### SOP-3: Protecting Salesforce API Budget During Traffic Spikes
+1. Monitor rolling 24h Salesforce API usage in Application Insights.
+2. If quota exceeds `80%`, lower `maxConcurrentCalls` on the Service Bus consumer and enable batch/throttled processing so inbound webhooks continue returning `202 Accepted` without dropping payments.

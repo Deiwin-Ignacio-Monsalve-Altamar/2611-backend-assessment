@@ -8,4 +8,5 @@ description = "Ignore assessment reference samples and the deliberately vulnerab
 paths = [
   '''^reference/''',
   '''^pr-review/PR-214\.diff$''',
+  '''^SUBMISSION_CHECKLIST.md/''',
 ]

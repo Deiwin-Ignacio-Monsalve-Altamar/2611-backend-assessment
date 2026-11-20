@@ -1,28 +1,36 @@
 # Meridian Mutual — Payment Webhook Ingestion Platform
 
-Backend engineering solution for **Meridian Mutual**, covering system architecture, API and event contracts, production incident PR review, and a runnable **Java 21 / Spring Boot 3** webhook ingestion microservice (`payments-intake`).
+Backend engineering assessment for **Meridian Mutual**. This repository includes the system architecture, API and event contracts, a runnable **Java 21 / Spring Boot 3** microservice (`payments-intake`), Azure Bicep infrastructure, GitHub Actions CI/CD, operational runbooks, and the code review for `PR-214`.
 
 ---
 
 ## What Was Built
 
-Meridian Mutual processes policy premium payments from regional gateways (**Andina Pay** in Colombia and **Quetzal Pagos** in Mexico) and synchronizes policy status downstream with Salesforce CRM.
+Meridian Mutual receives policy payment webhooks from **Andina Pay** (Colombia) and **Quetzal Pagos** (Mexico) and updates policy statuses in Salesforce CRM.
 
-This repository delivers two integrated parts:
+1. **Part A — Architecture & Design (`docs/`):**
+   - End-to-end ingestion design for traffic spikes, gateway retries, out-of-order events, and Salesforce API rate limits (`docs/design/SOLUTION_DESIGN.md`).
+   - Project assumptions (`docs/ASSUMPTIONS.md`) and three Architecture Decision Records (`docs/adr/`).
 
-1. **Part A — Architecture, Contracts & Incident Review:**
-   * End-to-end ingestion design addressing webhook bursts, gateway retries, out-of-order delivery, and Salesforce API governor limits.
-   * Explicit architectural assumptions and three Architecture Decision Records (ADRs).
-   * OpenAPI 3.1 contract for inbound webhooks and JSON Schema (`v1`) for canonical downstream events.
-   * Root-cause code review of `PR-214` linked to production incident `INC-0412`.
+2. **Part B — Microservice & Contracts (`practical/`, `docs/api/`):**
+   - OpenAPI 3.1 spec for inbound webhooks and JSON Schema (`v1`) for canonical events.
+   - Standalone **Java 21 / Spring Boot 3** service built with **Hexagonal Architecture**:
+     - **HMAC Verification:** Constant-time (`MessageDigest.isEqual`) HMAC-SHA256 validation per provider (`X-Andina-Signature` in Base64, `X-Quetzal-Signature` in Hex) with a `±300s` replay window.
+     - **Provider Normalization:** Strategy pattern (`AndinaPaymentStrategy`, `QuetzalPaymentStrategy`) mapping payloads to `CanonicalPaymentEvent` and formatting policy IDs as `POL-<COUNTRY>-<9_DIGITS>`.
+     - **Idempotency & Ordering:** Deduplication using `paymentKey` and state protection via `PaymentLifecycleState` (`INITIAL` -> `PENDING` -> `CAPTURED` / `FAILED` / `REFUNDED`).
+     - **Validation & Errors:** Typed Java records with Jakarta Validation and RFC 7807 `ProblemDetail` responses.
+     - **Observability:** Tracks `X-Correlation-Id` in SLF4J `MDC` and strips payer PII before logging or publishing.
 
-2. **Part B — Practical Microservice (`practical/`):**
-   * Standalone **Java 21 / Spring Boot 3** service implementing **Hexagonal Architecture** (Ports & Adapters).
-   * **Cryptographic Authentication:** Constant-time (`MessageDigest.isEqual`) HMAC-SHA256 verification per gateway (`X-Andina-Signature` in Base64, `X-Quetzal-Signature` in Hex) with a `±300s` replay tolerance window.
-   * **Provider Normalization:** Strategy pattern (`AndinaPaymentStrategy`, `QuetzalPaymentStrategy`) mapping heterogeneous payloads into `CanonicalPaymentEvent` and normalizing policy numbers to `POL-<COUNTRY>-<9_DIGITS>`.
-   * **Idempotency & Ordering:** Atomic deduplication via `idempotencyKey` and state-regression protection via `PaymentLifecycleState` (`INITIAL` -> `PENDING` -> `CAPTURED` / `FAILED` / `REFUNDED`).
-   * **Contract Validation & Error Handling:** Typed Java records with Jakarta Bean Validation (`@NotBlank`, `@Positive`) and standardized RFC 7807 `ProblemDetail` responses.
-   * **PII-Safe Observability:** Propagates `X-Correlation-Id` through SLF4J `MDC` and strips payer personal data from canonical events and logs.
+3. **Part C — Azure IaC & CI/CD (`infra/`, `.github/workflows/`):**
+   - Parameterized Bicep template (`infra/main.bicep`) for Azure Container Apps, Service Bus, Cosmos DB, Key Vault, and Application Insights across `dev`, `test`, and `prod`.
+   - GitHub Actions workflow (`.github/workflows/ci-cd.yml`) running Spotless formatting, tests, `>= 80%` JaCoCo coverage, `az bicep build`, Gitleaks secret scanning (`.gitleaks.toml`), and OIDC deployments (`dev -> test -> prod`).
+
+4. **Part D & E — Operations & PR Review (`docs/operations/`, `pr-review/`):**
+   - Operational runbook for SLIs, secret rotation, and Service Bus DLQ replay (`docs/operations/OPERATIONS.md`).
+   - Incident response and postmortem for `INC-0412` (`docs/operations/INC-0412-RESPONSE.md`) and code review of `PR-214` (`pr-review/REVIEW.md`).
+
+5. **Part F — Responsible AI (`AI_USAGE.md`, `docs/ai/`):**
+   - Transparent summary of how AI tools were used and verified (`AI_USAGE.md` and `docs/ai/AI_GUIDELINES.md`).
 
 ---
 
@@ -30,102 +38,94 @@ This repository delivers two integrated parts:
 
 ```text
 .
+├── .github/workflows/
+│   └── ci-cd.yml                                        # CI gates + OIDC CD pipeline (dev -> test -> prod)
+├── .gitleaks.toml                                       # Allowlist for assessment reference fixtures
 ├── docs/
-│   ├── ASSUMPTIONS.md                                   # Explicit assumptions and open questions
+│   ├── ASSUMPTIONS.md                                   # Project assumptions and open questions
 │   ├── adr/
-│   │   ├── 0001-salesforce-integration-pattern.md       # Downstream CRM decoupling and rate-limit protection
-│   │   ├── 0002-implementation-stack-and-datastore.md   # Runtime stack, Cosmos DB partitioning, and idempotency
-│   │   └── 0003-messaging-topology-and-dlq-replay.md    # Azure Service Bus topics, DLQ handling, and replay
+│   │   ├── 0001-salesforce-integration-pattern.md       # Async Salesforce decoupling and rate-limit protection
+│   │   ├── 0002-implementation-stack-and-datastore.md   # Stack choice, Cosmos DB partitioning, and idempotency
+│   │   └── 0003-messaging-topology-and-dlq-replay.md    # Service Bus topics, DLQs, and replay strategy
+│   ├── ai/
+│   │   └── AI_GUIDELINES.md                             # Team rules for safe AI usage
 │   ├── api/
-│   │   ├── webhooks.openapi.yaml                        # OpenAPI 3.1 contract for webhook intake
+│   │   ├── README.md                                    # API and event contracts summary
+│   │   ├── webhooks.openapi.yaml                        # OpenAPI 3.1 webhook specification
 │   │   └── events/
 │   │       └── premium-payment.schema.json              # Canonical payment event JSON Schema (v1)
-│   └── design/
-│       └── SOLUTION_DESIGN.md                           # Architecture overview, flows, and security controls
+│   ├── design/
+│   │   └── SOLUTION_DESIGN.md                           # Architecture overview, diagrams, and security
+│   ├── infra/
+│   │   └── AZURE_SERVICES.md                            # Cloud service choices and trade-offs
+│   └── operations/
+│       ├── INC-0412-RESPONSE.md                         # Incident containment, recovery, and postmortem
+│       └── OPERATIONS.md                                # SLIs, secret rotation, and DLQ replay steps
+├── infra/
+│   ├── README.md                                        # Bicep parameters and local validation
+│   └── main.bicep                                       # Azure resources definition
 ├── pr-review/
-│   └── REVIEW.md                                        # Code review findings and fixes for PR-214
+│   └── REVIEW.md                                        # Review findings and fixes for PR-214
 ├── practical/
-│   ├── README.md                                        # Detailed service guide
-│   ├── pom.xml                                          # Maven configuration (Java 21 + Spring Boot 3)
+│   ├── README.md                                        # Service setup and local curl examples
+│   ├── pom.xml                                          # Maven config (Java 21, Spring Boot 3, Spotless, JaCoCo)
 │   ├── requests.http                                    # Sample HTTP requests
 │   └── src/
-│       ├── main/
-│       │   ├── java/com/meridian/payments/
-│       │   │   ├── adapter/out/memory/                  # Thread-safe in-memory store and publisher adapters
-│       │   │   ├── controller/                          # REST endpoints and RFC 7807 ProblemDetail handler
-│       │   │   ├── dto/                                 # Typed request/response records with Bean Validation
-│       │   │   ├── model/                               # CanonicalPaymentEvent and PaymentLifecycleState
-│       │   │   ├── port/                                # Output ports (PaymentStorePort, EventPublisherPort)
-│       │   │   ├── security/                            # Constant-time HMAC-SHA256 signature verifier
-│       │   │   ├── service/                             # Orchestration and policy reference normalizer
-│       │   │   └── strategy/                            # Gateway strategies (Andina Pay, Quetzal Pagos)
-│       │   └── resources/
-│       │       └── application.yml                      # Server port, MDC log pattern, and webhook secrets
-│       └── test/
-│           └── java/com/meridian/payments/
-│               ├── WebhookIntakeIntegrationTest.java    # End-to-end MockMvc tests (202, 200, 400, 401)
-│               └── service/
-│                   └── PolicyNumberNormalizerTest.java  # Unit tests for CO/MX policy normalization
-├── AI_USAGE.md                                          # Summary of AI-assisted workflows and verification
-├── SUBMISSION.md                                        # Delivery summary and reviewer notes
-└── SUBMISSION_CHECKLIST.md                              # Final verification checklist
+│       ├── main/java/com/meridian/payments/             # Application source code
+│       └── test/java/com/meridian/payments/             # Unit and MockMvc integration tests
+├── AI_USAGE.md                                          # Disclosure of AI usage during the assessment
+├── SUBMISSION.md                                        # Final delivery summary
+└── SUBMISSION_CHECKLIST.md                              # Verification checklist
 ```
 
 ---
 
 ## Prerequisites
 
-* **Java 21+**
-* **Maven 3.9+** (or VS Code with *Extension Pack for Java* / IntelliJ IDEA)
-* `curl` and `openssl` (standard on macOS/Linux) for testing HMAC-signed requests
+- **Java 21+**
+- **Maven 3.9+**
+- `curl` and `openssl` (to generate HMAC signatures locally)
 
 ---
 
 ## How to Run the Application
 
-### Option 1: From Terminal (Maven)
 ```bash
 mvn -f practical/pom.xml spring-boot:run
 ```
 
-### Option 2: From VS Code / IntelliJ
-1. Open `practical/src/main/java/com/meridian/payments/PaymentsIntakeApplication.java`.
-2. Click **Run** above the `main` method.
+The service runs on `http://localhost:8080`. Check the health endpoint:
 
-The server starts on `http://localhost:8080`. Verify it is running:
 ```bash
 curl -i http://localhost:8080/v1/health
 ```
-Expected response: `200 OK` with body `payments-intake is running`.
+
+Expected output: `200 OK` with body `payments-intake is running`.
 
 ---
 
-## How to Run the Tests
+## How to Run Tests & Quality Gates
 
-The automated test suite includes:
-* `PolicyNumberNormalizerTest`: Unit tests verifying Colombian and Mexican policy reference normalization (`POL-<COUNTRY>-<9_DIGITS>`) and rejection of malformed inputs.
-* `WebhookIntakeIntegrationTest`: Full HTTP integration tests (`@SpringBootTest` + `MockMvc`) verifying valid webhook ingestion (`202 Accepted`), idempotent replay suppression (`200 OK` / `DUPLICATE`), out-of-order state regression protection (`200 OK` / `OUT_OF_ORDER_IGNORED`), invalid HMAC rejection (`401 Unauthorized`), and Bean Validation errors (`400 Bad Request` RFC 7807 `ProblemDetail`).
+Run code formatting check, tests, and the `>= 80%` JaCoCo coverage gate:
 
-### Option 1: From Terminal (Maven)
 ```bash
-mvn -f practical/pom.xml test
+mvn -f practical/pom.xml spotless:check
+mvn -f practical/pom.xml verify -Djacoco.haltOnFailure=true
 ```
 
-### Option 2: From VS Code
-1. Open the **Testing** panel in the left sidebar (`Cmd + ; A` on macOS).
-2. Click **Run Tests** to execute all tests across `PolicyNumberNormalizerTest` and `WebhookIntakeIntegrationTest`.
-
 ---
 
-## Testing the Endpoints Locally (HMAC-Signed Requests)
+## Testing Endpoints Locally (HMAC-Signed Requests)
 
-Every request to `POST /v1/webhooks/{provider}` requires a valid HMAC-SHA256 signature computed over `<unix_timestamp>.<raw_json_body>` within a `±300s` window.
+Requests to `POST /v1/webhooks/{provider}` need an HMAC-SHA256 signature over `<unix_timestamp>.<raw_json_body>` within `±300s`.
 
-Default local secrets in `practical/src/main/resources/application.yml` (overridable via `ANDINA_WEBHOOK_SECRET` and `QUETZAL_WEBHOOK_SECRET`):
-* **Andina Pay:** `local-andina-dev-secret`
-* **Quetzal Pagos:** `local-quetzal-dev-secret`
+Default local secrets in `practical/src/main/resources/application.yml`:
 
-### 1. Andina Pay (Colombia — Base64 HMAC-SHA256) -> `202 Accepted`
+- **Andina Pay:** `local-andina-dev-secret`
+- **Quetzal Pagos:** `local-quetzal-dev-secret`
+
+### 1. Andina Pay (Colombia — Base64 HMAC) -> `202 Accepted`
+
 ```bash
 TS=$(date +%s)
 BODY='{"notificacion_id":"notif-co-001","transaccion":{"id":"TRX-CO-5521907","estado":"APROBADA","valor":450000,"moneda":"COP","referencia":"POL-CO-88412","fecha_transaccion":"2026-11-19T18:00:00-05:00"}}'
@@ -139,7 +139,8 @@ curl -i -X POST http://localhost:8080/v1/webhooks/andina \
   -d "$BODY"
 ```
 
-### 2. Quetzal Pagos (Mexico — Hex HMAC-SHA256) -> `202 Accepted`
+### 2. Quetzal Pagos (Mexico — Hex HMAC) -> `202 Accepted`
+
 ```bash
 TS=$(date +%s)
 BODY='{"id":"evt_mx_99102","type":"charge.succeeded","created":'$TS',"data":{"charge":{"id":"ch_mx_4410","amount":125000,"currency":"MXN","reference":"POL MX 30219","paid_at":'$TS'}}}'
@@ -153,6 +154,7 @@ curl -i -X POST http://localhost:8080/v1/webhooks/quetzal \
 ```
 
 ### 3. Invalid Signature Check -> `401 Unauthorized`
+
 ```bash
 TS=$(date +%s)
 curl -i -X POST http://localhost:8080/v1/webhooks/quetzal \
@@ -163,13 +165,10 @@ curl -i -X POST http://localhost:8080/v1/webhooks/quetzal \
 
 ---
 
-## Key Documentation Links
+## Documentation Index
 
-* [Assumptions & Open Questions](docs/ASSUMPTIONS.md)
-* [Solution Design](docs/design/SOLUTION_DESIGN.md)
-* [ADR-0001: Salesforce Integration Pattern](docs/adr/0001-salesforce-integration-pattern.md)
-* [ADR-0002: Implementation Stack and Datastore](docs/adr/0002-implementation-stack-and-datastore.md)
-* [ADR-0003: Messaging Topology and DLQ Replay](docs/adr/0003-messaging-topology-and-dlq-replay.md)
-* [OpenAPI 3.1 Contract](docs/api/webhooks.openapi.yaml)
-* [Canonical Event Schema](docs/api/events/premium-payment.schema.json)
-* [PR-214 Code Review](pr-review/REVIEW.md)
+- **Part A (Design):** [Solution Design](docs/design/SOLUTION_DESIGN.md) · [Assumptions](docs/ASSUMPTIONS.md) · [ADR-0001](docs/adr/0001-salesforce-integration-pattern.md) · [ADR-0002](docs/adr/0002-implementation-stack-and-datastore.md) · [ADR-0003](docs/adr/0003-messaging-topology-and-dlq-replay.md)
+- **Part B (Contracts & Code):** [API Overview](docs/api/README.md) · [OpenAPI 3.1](docs/api/webhooks.openapi.yaml) · [Event Schema](docs/api/events/premium-payment.schema.json) · [Service Guide](practical/README.md)
+- **Part C (IaC & CI/CD):** [Bicep Guide](infra/README.md) · [Azure Services](docs/infra/AZURE_SERVICES.md) · [CI/CD Workflow](.github/workflows/ci-cd.yml)
+- **Part D & E (Ops & Review):** [Operations Runbook](docs/operations/OPERATIONS.md) · [INC-0412 Postmortem](docs/operations/INC-0412-RESPONSE.md) · [PR-214 Review](pr-review/REVIEW.md)
+- **Part F (Responsible AI):** [AI Usage](AI_USAGE.md) · [AI Guidelines](docs/ai/AI_GUIDELINES.md)

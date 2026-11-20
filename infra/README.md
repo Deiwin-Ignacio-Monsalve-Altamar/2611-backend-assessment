@@ -1,23 +1,27 @@
-# Azure Infrastructure as Code (`infra/`)
+# Azure Infrastructure as Code (`infra/main.bicep`)
 
-This folder contains the **Bicep** template (`main.bicep`) defining the Azure resources for Meridian Mutual's payment notifications platform.
+This folder contains the Azure Bicep template for the **Meridian Mutual Payment Webhook Platform**. Nothing is deployed in this assessment; the template is validated via `az bicep build`.
 
-## Resources Defined
+## Provisioned Resources
 
-* **Messaging (Azure Service Bus Standard):** Creates one queue per country (`payments-mx`, `payments-co`, `payments-cl`) with dead-lettering enabled (`maxDeliveryCount: 5`), plus the `canonical-payment-events` topic with subscriptions for Finance and Notifications.
-* **State & Idempotency (Azure Cosmos DB Serverless):** Creates the `payments` database and `payment_states` container partitioned by `/paymentKey` with a 90-day TTL.
-* **Compute & Identity (Azure App Service Linux — Java 21):** Runs the Spring Boot intake service behind the enterprise API Manager using a System-Assigned Managed Identity with least-privilege RBAC roles (`Key Vault Secrets User` and `Azure Service Bus Data Owner`).
-* **Secrets (Azure Key Vault):** Stores gateway HMAC secrets and Salesforce OAuth credentials outside application code and config files (`NFR6`).
-* **Observability (Application Insights & Azure Monitor):** Connects telemetry to the shared Log Analytics workspace and deploys a DLQ metric alert (`DeadletteredMessages > 0`) for **all three countries** (`mx`, `co`, `cl`).
+- **Azure Container Apps Environment & App (`payments-intake`):** Runs the Java 21 container with HTTP concurrency autoscaling (`1` to `10` replicas) and a System-Assigned Managed Identity.
+- **Azure Service Bus Namespace & Topic/Queues:** Decouples inbound webhook HTTP responses (`202 Accepted`) from downstream Salesforce CRM upserts, with Dead-Letter Queues (DLQs) enabled per country (`co`, `mx`, `cl`).
+- **Azure Cosmos DB (NoSQL API):** Stores canonical payment state partitioned by `/policyNumber` with a unique key constraint on `/paymentKey` for atomic deduplication and `_etag` optimistic concurrency.
+- **Azure Key Vault:** Stores gateway HMAC signing secrets (`andina-webhook-secret`, `quetzal-webhook-secret`), granted to the Container App via RBAC (`Key Vault Secrets User`) with zero stored secrets.
+- **Log Analytics & Application Insights:** Centralizes structured JSON logs (`X-Correlation-Id`) and metrics.
 
-## Parameters
+## Parameters & Environments
 
-* `environment`: `dev`, `test`, or `prod` (selects `B1` SKU for non-prod and `P1v3` with `alwaysOn` for `prod`).
-* `countries`: `['mx', 'co', 'cl']` (adding a fourth country code automatically provisions its queue and DLQ alert).
+The template is parameterized by `environment` (`dev`, `test`, `prod`), `location`, and `containerImageTag`:
 
-## Validation
+| Parameter / Setting | `dev` | `test` | `prod` |
+|---|---|---|---|
+| Container App Min/Max Replicas | `1` – `2` | `1` – `4` | `2` – `10` |
+| Service Bus SKU | `Standard` | `Standard` | `Premium` |
+| Cosmos DB Consistency | `Session` | `Session` | `Strong` / `Session` |
+| Deployment Approval Gate | Automatic on `main` | Automatic after `dev` | Manual approval + `what-if` preview |
 
-Per assessment instructions, resources are **not deployed**. The template is validated in CI using:
+## Local Validation
 
 ```bash
 az bicep build --file infra/main.bicep

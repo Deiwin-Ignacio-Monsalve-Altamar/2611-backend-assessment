@@ -1,38 +1,40 @@
 # Submission
 
-> Complete every section. Keep it short — this is the reviewers' entry point.
-
 ## Candidate
 
 | Field | Value |
 |---|---|
-| Candidate ID (provided by your recruiter) | |
-| Final commit SHA | |
-| Date and time of submission (with time zone) | |
+| Candidate ID (provided by your recruiter) | `deiwin1987@gmail.com` |
+| Final commit SHA | `7af684ebd74294faaed2d1da8c001a7c13faf3c0` |
+| Date and time of submission (with time zone) | 2026-11-20 07:10 COT (UTC-5) |
 
 ## Time spent
 
 | Part | Approximate time |
 |---|---|
-| A. Integration and data design | |
-| B. Integration component | |
-| C. Azure IaC and CI/CD | |
-| D. Operations | |
-| E. Code review | |
-| F. Responsible AI | |
-| **Total** | |
+| A. Integration and data design | 2.5 hrs |
+| B. Integration component | 3.5 hrs |
+| C. Azure IaC and CI/CD | 1.5 hrs |
+| D. Operations | 1.0 hr |
+| E. Code review | 1.0 hr |
+| F. Responsible AI | 0.5 hr |
+| **Total** | **10.0 hrs** |
 
 ## Stack
 
-- Practical part (Part B): <!-- e.g., Mule 4.x + DataWeave 2 + MUnit 3 / Java 21 + Spring Boot 3.x -->
-- Infrastructure as code: <!-- Bicep / Terraform, version -->
-- Pipeline: <!-- GitHub Actions / Azure Pipelines -->
-- CI run link (optional):
+- Practical part (Part B): Java 21 + Spring Boot 3.5.7 (Hexagonal Architecture, Jakarta Validation, RFC 7807 `ProblemDetail`, Spotless, JaCoCo `>= 80%`)
+- Infrastructure as code: Azure Bicep (`infra/main.bicep`)
+- Pipeline: GitHub Actions (`.github/workflows/ci-cd.yml` with OIDC `dev -> test -> prod` and Gitleaks)
+- CI run link (optional): https://github.com/Deiwin-Ignacio-Monsalve-Altamar/2611-backend-assessment/actions
 
 ## Where to start reading
 
-<!-- Point reviewers to the two or three files that best show your thinking. -->
+1. `docs/design/SOLUTION_DESIGN.md` and `docs/adr/` — Architecture for burst handling, idempotency, event ordering, and Salesforce CRM decoupling.
+2. `practical/src/main/java/com/meridian/payments/` — Java 21 / Spring Boot implementation with constant-time HMAC verification and provider strategies.
+3. `pr-review/REVIEW.md` and `docs/operations/INC-0412-RESPONSE.md` — Root-cause review of `PR-214` and operational runbook for `INC-0412`.
 
 ## Known gaps and what I would do next
 
-<!-- Be honest: what is incomplete, what you would change with more time, and in what order. -->
+1. **Cloud Persistence Adapters:** Swap the in-memory adapters (`adapter/out/memory/`) for real Azure Cosmos DB and Azure Service Bus adapters using the existing output ports.
+2. **Dependency Vulnerability Scanning:** Add Trivy or Dependabot CVE blocking once Spring Boot transitive dependencies have clean patches or a VEX allowlist so builds stay fast and deterministic.
+3. **Contract & Load Testing:** Add consumer-driven contract tests for the Salesforce consumer and load tests simulating high webhook retry bursts.

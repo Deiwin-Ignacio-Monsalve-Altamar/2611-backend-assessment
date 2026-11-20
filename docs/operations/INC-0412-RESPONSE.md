@@ -1,57 +1,63 @@
-# Incident Response — INC-0412 (Colombian Paid Policies Still Suspended)
+# Incident Response & Postmortem — INC-0412
 
-## 1. First 30 Minutes
-
-1. **00–05 min — Scope the impact and check Salesforce API budget:**
-   * Check Service Bus queue and DLQ metrics for all three countries. Confirm Mexico (`DLQ=2`) and Chile (`DLQ=0`) are healthy and the spike is isolated to `payments-co` (`4,312` messages in DLQ).
-   * Note that Salesforce 24h API usage jumped from `38%` to `66%` (`43,120` `400` errors in Colombia = `4,312` failed messages × `10` immediate retries). We are not hitting rate limits yet, so we have room to fix cleanly without shutting down traffic.
-2. **05–15 min — Inspect the DLQ messages and consumer logs:**
-   * Peek messages in `payments-co/$deadletterqueue` (read-only, without completing them) and search Application Insights by `correlationId` (`7f3a0c2e-…`).
-   * Group DLQ items by `lastError` and `estado` (`4,198` `APROBADA`, `61` `REVERSADA`, `53` `RECHAZADA`).
-3. **15–25 min — Check Friday and Saturday changes:**
-   * **Friday `v1.14.0` deploy (`18:05`):** Only touched `INFO` logging format; `32,880` Colombian payments still succeeded (`sfStatus=200`), so this is not a deployment regression.
-   * **Saturday Salesforce release (`22:00`):** Added a validation rule on `Policy__c` when cancelling a policy. That does not affect `Premium_Payment__c` upserts or `Policy_Number__c` lookups.
-4. **25–30 min — Update stakeholders:**
-   * Let the Colombian Contact-Center Lead know that no payments were lost—all `4,198` approved payments are safely sitting in `payments-co/$deadletterqueue` and will be reprocessed once we patch the policy number formatting.
+## 1. Incident Overview
+- **Incident ID:** `INC-0412`
+- **Severity:** **SEV-2** (escalated operationally due to 4,312 unapplied Colombian payments, active customer impact on suspended policies, and 66% Salesforce API quota burn)
+- **Opened:** Monday `2026-11-30 08:12` COT (UTC-5)
+- **Affected Scope:** Colombia (`payments-co`) only. Mexico (`payments-mx`) and Chile (`payments-cl`) are healthy.
 
 ---
 
-## 2. Root Cause & Evidence
+## 2. Root Cause Analysis
 
-* **Root cause:** The v1 consumer sends Andina Pay's raw `referencia` field directly to Salesforce as the `Policy_Number__c` external ID without normalizing it.
-* **Evidence from `payments-co/$deadletterqueue`:**
-  * `referencia="000215560"` failed with `400 INVALID_FIELD: Foreign key external ID: 000215560 not found for field Policy_Number__c in entity Policy__c` because it lacks the `POL-CO-` prefix.
-  * `referencia="pol-co-000198004"` failed with the same `400 INVALID_FIELD` because Salesforce external IDs are case-sensitive and expect uppercase `POL-CO-000198004`.
-  * Starting Saturday `2026-11-28 23:41`, Andina Pay started sending notifications with unprefixed or lowercase policy references, and the v1 consumer had no normalization step.
-* **Why API usage spiked:** The v1 consumer treats `400 INVALID_FIELD` as a transient failure and abandons the message immediately, burning all 10 delivery attempts in ~2.5 seconds (`23:41:07.412` to `23:41:09.902`) before moving it to the DLQ.
+### Primary Root Cause
+Starting Saturday `2026-11-28 23:41` COT, incoming webhooks from **Andina Pay** began sending unnormalized values in `transaccion.referencia` — specifically missing the country prefix (`"000215560"`) or using lowercase (`"pol-co-000198004"`). Because v1 passed `referencia` directly to Salesforce without canonical normalization (`POL-CO-<9_DIGITS>`), Salesforce rejected every upsert with:
+> `400 INVALID_FIELD: Foreign key external ID: <referencia> not found for field Policy_Number__c in entity Policy__c`
 
-**How to confirm:** Query `Policy__c` in Salesforce for `Policy_Number__c IN ('POL-CO-000215560', 'POL-CO-000198004')` to verify those policies exist in uppercase canonical format.
+### Contributing Factors (Why It Escalated)
+1. **Blind Retries on Permanent `400` Errors:** The `payments-co` consumer treated `400 INVALID_FIELD` as a transient failure and immediately abandoned the message 10 times within ~2.5 seconds (`23:41:07.412` to `23:41:09.902`). That turned **4,312** broken notifications into **43,120** failed Salesforce API calls, pushing daily API quota consumption from **38% to 66%**.
+2. **Missing Observability for Colombia & Chile:** A DLQ-depth alert was only configured for `payments-mx` during the Mexico pilot, leaving `payments-co` accumulating dead-lettered messages silently for ~32 hours.
 
----
-
-## 3. Remediation & Safe DLQ Replay
-
-### Step 1 — Fix the consumer before touching the DLQ
-1. **Normalize policy references:** Apply canonical normalization (`trim` -> `uppercase` -> extract digits -> zero-pad to 9 digits -> format as `POL-CO-<9_DIGITS>`) before building the Salesforce upsert payload.
-2. **Stop retrying permanent `400` errors:** If Salesforce returns `400 INVALID_FIELD` or `MALFORMED_ID`, send the message straight to the DLQ on the first attempt instead of retrying 10 times. Only retry transient `429` or `5xx` errors with backoff.
-
-### Step 2 — Replay `payments-co/$deadletterqueue` in chronological order
-We **must not** replay the DLQ in parallel. Look at `TRX-CO-5603318` in the DLQ:
-* First message (`2026-11-28T23:41:07`): `estado=APROBADA`
-* Third message (`2026-11-29T16:02:31`): `estado=REVERSADA`
-
-If `REVERSADA` runs before `APROBADA` (or gets overwritten), Salesforce could reinstate a policy whose payment was already refunded.
-
-1. **Deploy the patched consumer** and confirm live Colombian traffic with lowercase/unprefixed references returns `sfStatus=200`.
-2. **Run a controlled replay script** that reads `payments-co/$deadletterqueue`, groups messages by `transaccion.id`, sorts each group by `fecha_transaccion` ascending, and re-enqueues them sequentially into `payments-co`.
-3. **Rate-limit the replay** to `15 messages/second` (~5 minutes total for `4,312` messages) so Salesforce API usage stays safely below the 150k daily cap.
-4. **Verify closure:** Confirm `payments-co/$deadletterqueue` drops to `0`, spot-check the 37 customer cases reported by the contact center to verify policy reinstatement, and close the incident.
+### Ruled-Out Changes (Red Herrings)
+- **Salesforce Release (`Sat 22:00`):** Added a page layout and a cancellation reason validation rule on `Policy__c`. Neither affects `Premium_Payment__c` upserts by `Policy_Number__c`.
+- **Integration Deploy (`Fri 18:05`, `v1.14.0`):** Only changed `INFO` log formatting; failures started almost 30 hours later when Andina Pay's reference payload format shifted.
 
 ---
 
-## 4. Prevention
+## 3. Immediate Triage & Containment (First 30 Minutes)
 
-1. **Add DLQ alerts to all countries:** Currently only `payments-mx` has a DLQ alert from the pilot. Deploy the same `DeadLetteredMessageCount > 0` alert for `payments-co` and `payments-cl` via IaC.
-2. **Normalize at ingestion:** Enforce `POL-<COUNTRY>-<9_DIGITS>` normalization in the intake layer and reject unparseable references early.
-3. **Separate `4xx` from `5xx` in retry policies:** Never retry deterministic validation errors against Salesforce.
-4. **Regression tests:** Add unit tests with `000215560` and `pol-co-000198004` to the Colombian mapper suite.
+1. **Protect Salesforce API Quota:** Verify that `payments-co` main queue depth is `0` (already drained into DLQ) and **do not** blindly trigger a bulk DLQ replay before fixing normalization, as replaying 4,312 messages would burn another 43,120 API calls.
+2. **Create Urgent Alerts for All Countries:** Immediately add Azure Monitor alerts for `DeadLetteredMessageCount > 0` on `payments-co` and `payments-cl` (matching `payments-mx`), plus an alert on Salesforce `400` error spikes (`> 50/5min`).
+3. **Contact Andina Pay & Coordinate Customer Support:**
+   - Notify Andina Pay's technical team about the `referencia` format change (`000215560` / `pol-co-...` instead of `POL-CO-000215560`).
+   - Share the list of affected policy numbers from `payments-co/$deadletterqueue` with Colombia Contact Center so agents can manually verify receipts and temporarily unsuspend policies for the 37+ affected customers while automated replay is prepared.
+
+---
+
+## 4. Safe DLQ Recovery & Replay Plan
+
+> **Critical Ordering Warning:** Inspecting `payments-co/$deadletterqueue` reveals multiple lifecycle events for the same transaction — for example, `TRX-CO-5603318` arrived first as `APROBADA` (`2026-11-28 23:41:07`) and later as `REVERSADA` (`2026-11-29 16:02:31`). Replaying messages out of order or without consolidation could falsely activate a policy whose payment was already reversed.
+
+### Step-by-Step Recovery
+1. **Deploy Hotfix (`v1.14.1`):**
+   - Apply `PolicyNumberNormalizer` (`POL-CO-<9_DIGITS>`, trimming whitespace, uppercasing, and left-padding digits with zeros when prefix is omitted) before publishing/upserting.
+   - Classify HTTP `400` responses from Salesforce as **non-retryable poison/validation errors** and route them straight to DLQ on attempt 1 instead of retrying 10 times.
+2. **Export & Deduplicate DLQ Messages Before Replay:**
+   - Read all **4,312** messages from `payments-co/$deadletterqueue` (`4,198 APROBADA`, `61 REVERSADA`, `53 RECHAZADA`) into a staging script/file.
+   - Normalize `referencia` to `POL-CO-<9_DIGITS>` and validate each policy ID against Salesforce `Policy__c` in read-only bulk query first (quarantining any genuinely non-existent policy numbers for manual Finance review).
+   - Group messages by `transaccion.id` and sort by event timestamp so state transitions (`APROBADA` -> `REVERSADA`) execute in strict chronological order.
+3. **Throttled Replay:**
+   - Re-enqueue the normalized, ordered messages into `payments-co` at a controlled rate (**15–20 msg/sec**) while monitoring Salesforce API budget (`< 75%` ceiling) and confirming `0` `400 INVALID_FIELD` responses.
+4. **Post-Replay Audit:**
+   - Confirm `payments-co/$deadletterqueue` depth reaches `0` and reconcile the 37 customer support tickets with Colombia Contact Center.
+
+---
+
+## 5. Long-Term Preventative Actions
+
+| Area | Action | Owner |
+|---|---|---|
+| **Input Normalization** | Enforce canonical `POL-<COUNTRY>-<9_DIGITS>` normalization at the webhook ingress boundary (`PolicyNumberNormalizer`) before events enter Service Bus. | Payments Squad |
+| **Error Classification** | Separate transient errors (`429`, `502`, `503`, timeouts -> exponential backoff retry) from permanent errors (`400 INVALID_FIELD` -> immediate dead-letter + alert). | Payments Squad |
+| **Multi-Country Monitoring** | Provision DLQ-depth alerts via Bicep (`infra/main.bicep`) automatically for every country queue/subscription (`co`, `mx`, `cl`) so pilot-only gaps cannot happen again. | Platform / SRE |
+| **Contract Testing** | Add automated regression tests covering unprefixed (`000215560`) and lowercase (`pol-co-000198004`) provider references (`PolicyNumberNormalizerTest`). | Payments Squad |
