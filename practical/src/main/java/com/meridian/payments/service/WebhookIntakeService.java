@@ -1,18 +1,16 @@
 package com.meridian.payments.service;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-
-import org.springframework.stereotype.Service;
-
 import com.meridian.payments.model.CanonicalPaymentEvent;
 import com.meridian.payments.model.PaymentLifecycleState;
 import com.meridian.payments.port.EventPublisherPort;
 import com.meridian.payments.port.PaymentStorePort;
 import com.meridian.payments.strategy.PaymentProviderStrategy;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.springframework.stereotype.Service;
 
 /**
  * Orchestrates webhook intake using Strategy for provider mapping,
@@ -30,9 +28,7 @@ public class WebhookIntakeService {
             PaymentStorePort paymentStore,
             EventPublisherPort eventPublisher) {
         this.strategiesByProvider = strategies.stream()
-                .collect(Collectors.toUnmodifiableMap(
-                        s -> s.providerKey().toLowerCase(),
-                        Function.identity()));
+                .collect(Collectors.toUnmodifiableMap(s -> s.providerKey().toLowerCase(), Function.identity()));
         this.paymentStore = paymentStore;
         this.eventPublisher = eventPublisher;
     }

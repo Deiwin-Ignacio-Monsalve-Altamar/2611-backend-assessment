@@ -7,10 +7,8 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.HexFormat;
-
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -40,7 +38,9 @@ public class WebhookHmacVerifier {
         switch (provider.trim().toLowerCase()) {
             case "andina" -> verifyAndina(rawBody, headers);
             case "quetzal" -> verifyQuetzal(rawBody, headers);
-            default -> { /* Let controller validate unknown provider */ }
+            default -> {
+                /* Let controller validate unknown provider */
+            }
         }
     }
 

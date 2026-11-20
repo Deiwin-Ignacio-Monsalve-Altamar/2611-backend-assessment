@@ -5,9 +5,7 @@ import com.meridian.payments.model.CanonicalPaymentEvent;
 /**
  * Outcome of processing an inbound webhook through idempotency and state checks.
  */
-public record IntakeResult(
-        Outcome outcome,
-        CanonicalPaymentEvent event) {
+public record IntakeResult(Outcome outcome, CanonicalPaymentEvent event) {
 
     public enum Outcome {
         ACCEPTED,

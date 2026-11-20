@@ -1,19 +1,16 @@
 package com.meridian.payments.strategy;
 
-import java.math.RoundingMode;
-import java.time.Instant;
-import java.util.Set;
-import java.util.UUID;
-
-import org.springframework.stereotype.Component;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meridian.payments.dto.AndinaWebhookRequest;
 import com.meridian.payments.model.CanonicalPaymentEvent;
 import com.meridian.payments.service.PolicyNumberNormalizer;
-
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.util.Set;
+import java.util.UUID;
+import org.springframework.stereotype.Component;
 
 /**
  * Strategy implementation for Andina Pay (Colombia).
@@ -26,9 +23,7 @@ public class AndinaPaymentStrategy implements PaymentProviderStrategy {
     private final PolicyNumberNormalizer policyNormalizer;
 
     public AndinaPaymentStrategy(
-            ObjectMapper objectMapper,
-            Validator validator,
-            PolicyNumberNormalizer policyNormalizer) {
+            ObjectMapper objectMapper, Validator validator, PolicyNumberNormalizer policyNormalizer) {
         this.objectMapper = objectMapper;
         this.validator = validator;
         this.policyNormalizer = policyNormalizer;
@@ -50,13 +45,14 @@ public class AndinaPaymentStrategy implements PaymentProviderStrategy {
         String currency = tx.currency().trim().toUpperCase();
         String policyNumber = policyNormalizer.normalize(tx.reference(), "CO");
 
-        String canonicalStatus = switch (rawState) {
-            case "PENDIENTE" -> "PENDING";
-            case "APROBADA" -> "CAPTURED";
-            case "RECHAZADA" -> "FAILED";
-            case "REVERSADA" -> "REFUNDED";
-            default -> throw new IllegalArgumentException("Unsupported Andina transaction state: " + rawState);
-        };
+        String canonicalStatus =
+                switch (rawState) {
+                    case "PENDIENTE" -> "PENDING";
+                    case "APROBADA" -> "CAPTURED";
+                    case "RECHAZADA" -> "FAILED";
+                    case "REVERSADA" -> "REFUNDED";
+                    default -> throw new IllegalArgumentException("Unsupported Andina transaction state: " + rawState);
+                };
 
         return new CanonicalPaymentEvent(
                 CanonicalPaymentEvent.SCHEMA_VERSION,

@@ -1,20 +1,17 @@
 package com.meridian.payments.strategy;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meridian.payments.dto.QuetzalWebhookRequest;
+import com.meridian.payments.model.CanonicalPaymentEvent;
+import com.meridian.payments.service.PolicyNumberNormalizer;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validator;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
-
 import org.springframework.stereotype.Component;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.meridian.payments.dto.QuetzalWebhookRequest;
-import com.meridian.payments.model.CanonicalPaymentEvent;
-import com.meridian.payments.service.PolicyNumberNormalizer;
-
-import jakarta.validation.ConstraintViolation;
-import jakarta.validation.Validator;
 
 /**
  * Strategy implementation for Quetzal Pagos (Mexico).
@@ -27,9 +24,7 @@ public class QuetzalPaymentStrategy implements PaymentProviderStrategy {
     private final PolicyNumberNormalizer policyNormalizer;
 
     public QuetzalPaymentStrategy(
-            ObjectMapper objectMapper,
-            Validator validator,
-            PolicyNumberNormalizer policyNormalizer) {
+            ObjectMapper objectMapper, Validator validator, PolicyNumberNormalizer policyNormalizer) {
         this.objectMapper = objectMapper;
         this.validator = validator;
         this.policyNormalizer = policyNormalizer;
@@ -53,12 +48,13 @@ public class QuetzalPaymentStrategy implements PaymentProviderStrategy {
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP)
                 .toPlainString();
 
-        String canonicalStatus = switch (payload.type().trim()) {
-            case "charge.succeeded" -> "CAPTURED";
-            case "charge.failed" -> "FAILED";
-            case "charge.refunded" -> "REFUNDED";
-            default -> throw new IllegalArgumentException("Unsupported Quetzal event type: " + payload.type());
-        };
+        String canonicalStatus =
+                switch (payload.type().trim()) {
+                    case "charge.succeeded" -> "CAPTURED";
+                    case "charge.failed" -> "FAILED";
+                    case "charge.refunded" -> "REFUNDED";
+                    default -> throw new IllegalArgumentException("Unsupported Quetzal event type: " + payload.type());
+                };
 
         long statusEpoch = payload.created();
         if ("REFUNDED".equals(canonicalStatus) && charge.refundedAt() != null) {

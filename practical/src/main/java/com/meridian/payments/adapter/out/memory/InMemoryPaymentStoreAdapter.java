@@ -1,13 +1,11 @@
 package com.meridian.payments.adapter.out.memory;
 
+import com.meridian.payments.model.CanonicalPaymentEvent;
+import com.meridian.payments.port.PaymentStorePort;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-
 import org.springframework.stereotype.Component;
-
-import com.meridian.payments.model.CanonicalPaymentEvent;
-import com.meridian.payments.port.PaymentStorePort;
 
 /**
  * Thread-safe in-memory adapter for idempotency and payment state tracking.

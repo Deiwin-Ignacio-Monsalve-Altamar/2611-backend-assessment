@@ -1,8 +1,7 @@
 package com.meridian.payments.port;
 
-import java.util.List;
-
 import com.meridian.payments.model.CanonicalPaymentEvent;
+import java.util.List;
 
 /**
  * Driven port for publishing validated canonical payment events downstream

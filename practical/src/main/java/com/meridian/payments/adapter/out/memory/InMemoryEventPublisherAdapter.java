@@ -1,13 +1,11 @@
 package com.meridian.payments.adapter.out.memory;
 
+import com.meridian.payments.model.CanonicalPaymentEvent;
+import com.meridian.payments.port.EventPublisherPort;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-
 import org.springframework.stereotype.Component;
-
-import com.meridian.payments.model.CanonicalPaymentEvent;
-import com.meridian.payments.port.EventPublisherPort;
 
 /**
  * In-memory adapter replacing Azure Service Bus Topic publishing for local runs and tests.

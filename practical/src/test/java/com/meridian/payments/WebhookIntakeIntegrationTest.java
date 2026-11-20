@@ -1,6 +1,8 @@
 package com.meridian.payments;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -8,10 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
-
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -30,9 +30,17 @@ class WebhookIntakeIntegrationTest {
     private MockMvc mockMvc;
 
     @Test
+    void shouldReturnHealthyStatus() throws Exception {
+        mockMvc.perform(get("/v1/health"))
+                .andExpect(status().isOk())
+                .andExpect(content().string("payments-intake is running"));
+    }
+
+    @Test
     void shouldAcceptValidAndinaWebhookAndIgnoreDuplicates() throws Exception {
         long timestamp = Instant.now().getEpochSecond();
-        String payload = """
+        String payload =
+                """
                 {
                   "notificacion_id": "notif-test-001",
                   "transaccion": {
@@ -72,7 +80,8 @@ class WebhookIntakeIntegrationTest {
         long timestamp = Instant.now().getEpochSecond();
 
         // 1. Captured arrives first
-        String capturedPayload = """
+        String capturedPayload =
+                """
                 {
                   "notificacion_id": "notif-order-2",
                   "transaccion": {
@@ -93,7 +102,8 @@ class WebhookIntakeIntegrationTest {
                 .andExpect(status().isAccepted());
 
         // 2. Late Pending arrives afterward -> ignored with 200 OK
-        String latePendingPayload = """
+        String latePendingPayload =
+                """
                 {
                   "notificacion_id": "notif-order-1",
                   "transaccion": {
@@ -118,7 +128,8 @@ class WebhookIntakeIntegrationTest {
     @Test
     void shouldAcceptValidQuetzalWebhook() throws Exception {
         long timestamp = Instant.now().getEpochSecond();
-        String payload = """
+        String payload =
+                """
                 {
                   "id": "evt_mx_3003",
                   "type": "charge.succeeded",
@@ -133,7 +144,8 @@ class WebhookIntakeIntegrationTest {
                     }
                   }
                 }
-                """.formatted(timestamp, timestamp);
+                """
+                        .formatted(timestamp, timestamp);
         String v1 = signHex(QUETZAL_SECRET, timestamp + "." + payload);
 
         mockMvc.perform(post("/v1/webhooks/quetzal")
@@ -158,9 +170,39 @@ class WebhookIntakeIntegrationTest {
     }
 
     @Test
+    void shouldRejectExpiredTimestampWith401() throws Exception {
+        long expiredTimestamp = Instant.now().minusSeconds(600).getEpochSecond();
+        String payload = "{\"id\":\"evt_expired\"}";
+        String signature = signBase64(ANDINA_SECRET, expiredTimestamp + "." + payload);
+
+        mockMvc.perform(post("/v1/webhooks/andina")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Andina-Timestamp", String.valueOf(expiredTimestamp))
+                        .header("X-Andina-Signature", signature)
+                        .content(payload))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void shouldRejectMalformedJsonWith400() throws Exception {
+        long timestamp = Instant.now().getEpochSecond();
+        String malformedJson = "{ invalid-json ";
+        String signature = signBase64(ANDINA_SECRET, timestamp + "." + malformedJson);
+
+        mockMvc.perform(post("/v1/webhooks/andina")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Andina-Timestamp", String.valueOf(timestamp))
+                        .header("X-Andina-Signature", signature)
+                        .content(malformedJson))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").exists());
+    }
+
+    @Test
     void shouldRejectInvalidPayloadWith400ProblemDetail() throws Exception {
         long timestamp = Instant.now().getEpochSecond();
-        String invalidPayload = """
+        String invalidPayload =
+                """
                 {
                   "notificacion_id": "notif-bad-001",
                   "transaccion": {

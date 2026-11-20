@@ -1,8 +1,7 @@
 package com.meridian.payments.port;
 
-import java.util.Optional;
-
 import com.meridian.payments.model.CanonicalPaymentEvent;
+import java.util.Optional;
 
 /**
  * Driven port for payment persistence: atomic idempotency registration
