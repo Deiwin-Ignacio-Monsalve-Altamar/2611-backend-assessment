@@ -44,11 +44,11 @@ public class AndinaPaymentStrategy implements PaymentProviderStrategy {
         AndinaWebhookRequest payload = objectMapper.readValue(rawBody, AndinaWebhookRequest.class);
         validatePayload(payload);
 
-        var tx = payload.transaccion();
-        String rawState = tx.estado().trim().toUpperCase();
-        String amount = tx.valor().setScale(2, RoundingMode.HALF_UP).toPlainString();
-        String currency = tx.moneda().trim().toUpperCase();
-        String policyNumber = policyNormalizer.normalize(tx.referencia(), "CO");
+        var tx = payload.transaction();
+        String rawState = tx.status().trim().toUpperCase();
+        String amount = tx.amount().setScale(2, RoundingMode.HALF_UP).toPlainString();
+        String currency = tx.currency().trim().toUpperCase();
+        String policyNumber = policyNormalizer.normalize(tx.reference(), "CO");
 
         String canonicalStatus = switch (rawState) {
             case "PENDIENTE" -> "PENDING";
@@ -65,14 +65,14 @@ public class AndinaPaymentStrategy implements PaymentProviderStrategy {
                 "ANDINA",
                 "CO",
                 "ANDINA:" + tx.id().trim(),
-                payload.notificacionId().trim(),
+                payload.notificationId().trim(),
                 tx.id().trim(),
                 "ANDINA:" + tx.id().trim() + ":" + rawState,
                 policyNumber,
                 canonicalStatus,
                 amount,
                 currency,
-                tx.fechaTransaccion().toInstant(),
+                tx.transactionDate().toInstant(),
                 Instant.now());
     }
 

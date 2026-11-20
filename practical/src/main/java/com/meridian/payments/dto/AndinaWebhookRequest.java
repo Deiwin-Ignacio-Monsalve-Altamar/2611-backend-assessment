@@ -10,20 +10,17 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
-/**
- * Strongly-typed incoming webhook contract for Andina Pay (Colombia).
- */
 public record AndinaWebhookRequest(
-        @NotBlank @JsonProperty("notificacion_id") String notificacionId,
-        @NotNull @Valid @JsonProperty("transaccion") Transaccion transaccion) {
+        @NotBlank @JsonProperty("notificacion_id") String notificationId,
+        @NotNull @Valid @JsonProperty("transaccion") Transaction transaction) {
 
-    public record Transaccion(
-            @NotBlank String id,
-            @NotBlank String estado,
-            @NotNull @Positive BigDecimal valor,
-            @NotBlank String moneda,
-            @NotBlank String referencia,
-            @NotNull @JsonProperty("fecha_transaccion") OffsetDateTime fechaTransaccion,
-            @JsonProperty("motivo_reverso") String motivoReverso) {
+    public record Transaction(
+            @NotBlank @JsonProperty("id") String id,
+            @NotBlank @JsonProperty("estado") String status,
+            @NotNull @Positive @JsonProperty("valor") BigDecimal amount,
+            @NotBlank @JsonProperty("moneda") String currency,
+            @NotBlank @JsonProperty("referencia") String reference,
+            @NotNull @JsonProperty("fecha_transaccion") OffsetDateTime transactionDate,
+            @JsonProperty("motivo_reverso") String reversalReason) {
     }
 }

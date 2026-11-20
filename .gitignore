@@ -25,4 +25,9 @@ build/
 .env
 *.env
 
-practical/requests.http
+# Build outputs
+practical/target/
+
+# Environment & secrets
+
+*.local
