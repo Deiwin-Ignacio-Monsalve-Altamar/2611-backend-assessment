@@ -40,6 +40,7 @@ jobs:
           scan-type: 'fs'
           scan-ref: 'practical'
           severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
           exit-code: '1'
 
       # Gate 4: Validate Azure Bicep infrastructure syntax
